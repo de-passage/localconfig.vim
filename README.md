@@ -37,3 +37,4 @@ PR welcome!
 Things I'd like to add:
 + Support for other VCSs. I only use git so feel free to chime in if you know how they work
 + SHA-based whitelist: allow the user to register a script's signature with the plugin and only source files matching the whitelist.  
++ Optional confirmation before loading file
