@@ -15,9 +15,9 @@ endfunction
 
 " Open the local config file. If the local configuration folder ('.vim')
 " doesn't exist, create it
-function localconfig#OpenLocalConfig(local_config_dir, local_config_file_name, auto_reload)
-  let l:local_config_dir_name = a:local_config_dir
-  let l:local_config_file_name = a:local_config_file_name
+function localconfig#OpenLocalConfig(options)
+  let l:local_config_dir_name = a:options.directory
+  let l:local_config_file_name = a:options.file
 
   let l:project_dir = GetProjectRoot(l:local_config_dir_name) . '/'
   let l:config_dir = l:project_dir . l:local_config_dir_name
@@ -44,20 +44,23 @@ function localconfig#OpenLocalConfig(local_config_dir, local_config_file_name, a
   endif
 endfunction
 
-function localconfig#LoadConfigFile(config_directory, config_file, policy, ask_confirmation)
+function localconfig#LoadConfigFile(options)
+  let l:config_directory = a:options.directory
+  let l:config_file = a:options.file
+  let l:policy = a:options.policy
 
-  let l:local_config = localconfig#GetProjectRoot(a:config_directory) . "/" . a:config_directory . "/" . a:config_file
+  let l:local_config = localconfig#GetProjectRoot(l:config_directory) . "/" . l:config_directory . "/" . l:config_file
 
   if !filereadable(l:local_config)
     return
   endif
 
   let l:load_file = 0
-  if a:policy == 'none'
+  if l:policy == 'none'
     let l:load_file = 1
-  elseif a:policy == 'filename'
+  elseif l:policy == 'filename'
     let load_file = 1
-  elseif a:policy == 'sha256'
+  elseif l:policy == 'sha256'
     let load_file = 1
   endif
 
