@@ -16,23 +16,21 @@ function s:sys_call_throw(cmd, msg)
   endif
 endfunction
 
-function s:create_directory(dir_name)
-  return s:sys_call('mkdir -p '. a:dir_name)
-endfunction
-
-function s:get_permissions(file)
-  return s:sys_call_throw('stat -c %a ' . a:file, "failed to get permissions for '" . a:file . "'")
-endfunction
-
-function s:has_valid_permissions(file)
-  return s:get_permissions(a:file) == "600"
+function s:has_valid_permissions(file, debug)
+  if a:debug
+    echom "permissions for " . a:file . " : " . getfperm(a:file)
+  endif
+  return getfperm(a:file) == "rw-------"
 endfunction
 
 function s:create_cache_directory(dir_name)
-  if s:create_directory(a:dir_name)
-    return s:sys_call('chmod 700 ' . a:dir_name)
+  let dirname = expand(a:dir_name)
+  if !mkdir(dirname, 'p')
+    throw "Couldn't create directory " . dirname . "'. Check your permissions"
   endif
-  return v:false
+  if !setfperm(dirname, 'rwx------')
+    throw "Couldn't set permissions of '" . dirname . "'"
+  endif
 endfunction
 
 function s:compute_sha256(file)
@@ -45,29 +43,67 @@ function s:create_cache_file(file, content)
 endfunction
 
 function s:mangle_file_name(file)
-  return substitute(a:file, '\/\+', '%%', 'g')
+  return substitute(expand(a:file), '\/\+', '%', 'g')
 endfunction
 
+function s:compute_signature(file_name, policy)
+  if a:policy == 'sha256'
+    return s:compute_sha256(a:file_name)
+  elseif a:policy == 'filename'
+    return ''
+  else
+    throw "Invalid policy '" . policy . "'. Cannot compute file signature"
+  endif
+endfunction
+
+" This is a test documentation
 function s:create_signature_file(options)
   let l:full_file_name = a:options.full_file_name
   let l:cache_dir = a:options.cache_directory
   let l:file = s:mangle_file_name(l:full_file_name)
   let l:cache_filename = l:cache_dir . '/' . l:file
-  let l:method = a:options.policy
+  let l:policy = a:options.policy
 
-  if !s:create_cache_directory(cache_dir)
-    throw "Couldn't create cache directory '" . l:cache_dir . "'"
-  endif
-
-  if l:method == ''
+  if l:policy == ''
     return
   else
-    if l:method == 'sha256'
-      call s:create_cache_file(l:cache_filename, s:compute_sha256(l:full_file_name))
-    elseif l:method == 'filename'
-      call s:create_cache_file(l:cache_filename, '')
-    endif
+    echom "creating file " . l:cache_filename
+    call s:create_cache_directory(l:cache_dir)
+    call s:create_cache_file(l:cache_filename, s:compute_signature(l:full_file_name, l:policy))
   endif
+endfunction
+
+function s:is_signature_valid(options)
+  let l:policy = a:options.policy
+  let l:debug = a:options.traces == 2
+
+  if l:debug
+    echom "checking signature with policy '" . l:policy . "'"
+  endif
+
+  if l:policy == ''
+    return v:true
+  endif
+
+  let l:file_name = a:options.full_file_name
+  let l:cache_filename = a:options.cache_directory . '/' . s:mangle_file_name(l:file_name)
+
+  if l:debug
+    echom "Signature file is '" . l:cache_filename . "', exists? " . filereadable(l:cache_filename)
+  endif
+
+  if ! (filereadable(l:cache_filename) && s:has_valid_permissions(l:cache_filename, l:debug))
+    return v:false
+  endif
+
+  let l:expected_signature = get(readfile(l:cache_filename), 0, '')
+  let l:actual_signature = s:compute_signature(l:file_name, l:policy)
+
+  if l:debug
+    echom "Signatures expected/actual: " . l:expected_signature . " == " . l:actual_signature
+  endif
+
+  return l:expected_signature == l:actual_signature
 endfunction
 
 " Get the project root based on the given directory and the git root
@@ -85,61 +121,81 @@ function localconfig#GetProjectRoot(local_config_dir_name)
   return l:found_dir
 endfunction
 
+" Do everything that needs doing when save happens
+function localconfig#TriggerSaveConfig()
+  try
+    let l:file = s:cached_options.full_file_name
+    let l:signature_was_valid = s:cached_options.signature_was_valid
+
+    if l:signature_was_valid || confirm("File signature was invalid, do you want to generate it now?", "&yes\n&No", 2) == 1
+      call s:create_signature_file(s:cached_options)
+      let s:cached_options.signature_was_valid = v:true
+    endif
+
+    if s:cached_options.auto_reload && (l:signature_was_valid || confirm("Do you want to reload local configuration? ", "&yes\n&No", 2) == 1)
+      exec "source " . l:file
+    endif
+  catch
+    echoerr v:exception
+  endtry
+endfunction
+
 " Open the local config file. If the local configuration folder ('.vim')
 " doesn't exist, create it
 function localconfig#OpenLocalConfig(options)
-  let l:local_config_dir_name = a:options.directory
-  let l:local_config_file_name = a:options.file
+  try
+    let l:local_config_dir_name = a:options.directory
+    let l:local_config_file_name = a:options.file
 
-  let l:project_dir = localconfig#GetProjectRoot(l:local_config_dir_name) . '/'
-  let l:config_dir = l:project_dir . l:local_config_dir_name
-  let l:config_file = l:config_dir . '/' . l:local_config_file_name
-  let a:options.full_file_name = l:config_file
+    let l:project_dir = localconfig#GetProjectRoot(l:local_config_dir_name) . '/'
+    let l:config_dir = l:project_dir . l:local_config_dir_name
+    let l:config_file = l:config_dir . '/' . l:local_config_file_name
+    let a:options.full_file_name = l:config_file
 
-  if isdirectory(l:config_dir)
-    execute 'edit' . l:config_file
-  elseif filereadable(l:project_dir . l:local_config_file_name)
-    echoerr l:project_dir . ' exists and is not a directory'
-    return
+    let s:cached_options = a:options
 
-  elseif l:local_config_dir_name != ''
-    if s:create_directory(l:config_dir)
-      execute 'edit' . l:config_file
-    else
-      echoerr 'Unexpected error while creating ' . l:local_config_dir_name . ' folder. Check your permissions & content of the current directory.'
-      return
+    if filereadable(l:config_dir)
+      throw l:project_dir . ' exists and is not a directory'
+
+    elseif l:local_config_dir_name != ''
+      call mkdir(l:config_dir, 'p')
+
     endif
-  endif
 
-  if auto_reload == 1
-    exec 'autocmd BufWritePost ' . l:config_file . ' source ' . l:config_file
-  endif
+    let s:cached_options.signature_was_valid = !filereadable(l:config_file) || s:is_signature_valid(a:options)
+
+    execute 'edit' . l:config_file
+  catch
+    echoerr v:exception
+  endtry
 endfunction
 
 function localconfig#LoadConfigFile(options)
-  let l:config_directory = a:options.directory
-  let l:config_file = a:options.file
-  let l:policy = a:options.policy
+  try
+    let l:config_directory = a:options.directory
+    let l:config_file = a:options.file
+    let l:policy = a:options.policy
 
-  let l:local_config = localconfig#GetProjectRoot(l:config_directory) . '/' . l:config_directory . '/' . l:config_file
-  let a:options.full_file_name = l:local_config
+    let l:local_config = localconfig#GetProjectRoot(l:config_directory) . '/' . l:config_directory . '/' . l:config_file
+    let a:options.full_file_name = l:local_config
 
-  if !filereadable(l:local_config)
-    return
-  endif
+    let s:cached_options = a:options
+    let s:cached_options.signature_was_valid = v:true
 
-  let l:load_file = 0
-  if l:policy == 'none'
-    let l:load_file = 1
-  elseif l:policy == 'filename'
-    let load_file = 1
-  elseif l:policy == 'sha256'
-    let load_file = 1
-  endif
+    if !filereadable(l:local_config)
+      return
+    endif
 
-  if l:load_file == 1
+    if ! s:is_signature_valid(a:options)
+      throw "Invalid signature for configuration file " . a:options.full_file_name . ". It will not be loaded. Check that the signature file has the correct permissions (600) and matches the content of the configuration"
+    endif
+
     execute 'source ' . l:local_config
-    echom 'Loaded local config from ' . l:local_config
-  endif
-
+    if a:options.traces > 0
+      echom 'Loaded local config from ' . l:local_config
+    endif
+  catch
+    let s:cached_options.signature_was_valid = v:false
+    echoerr v:exception
+  endtry
 endfunction
