@@ -51,6 +51,8 @@ Loading arbitrary vimscript files is dangerous. They run with the user's privile
 
 To avoid this issue while retaining the usefulness of a local configuration that may be shared between users (through git for example), this plugin manages a whitelist of files that can be loaded along with the signature of their last known content. In case of mismatch, for example if the file is not registered in the whitelist or if someone else modified it, an error will be shown and the file won't be loaded.
 
+Whitelist management is generally automatic. localconfig uses autocommands to regenerate the whitelist as configuration files are saved, so in most cases, you can open your file, either with `:LocalConfig` or as you normally would and all the computations are done without any input. In case of trouble, you'll be prompted what to do.
+
 It may happen that you see the error showing up when nothing nefarious has happened. A colleague may have changed the file, you may have edited it from without Vim, or the whitelist was somehow corrupted. In this event, simply open the file from Vim (with this plugin active), **review it carefully**, then save it. A prompt will offer you to generate the signature file. Press 'y' to accept, then 'y' again to load the file immediately. You'll have to repeat this for all of your configuration files if you change the some part of the plugin configuration that deals with whitelist management.
 
 Avoid sourcing other files from the local configuration file, no verification will be done on those. I'll provide something to solve this problem in the future.
@@ -63,3 +65,4 @@ Things I'd like to add:
 + Support for other VCSs. I only use git so feel free to chime in if you know how they work
 + Windows support. In this state it won't work correctly
 + Expose some of the internal mechanisms to allow whitelisting and checking other files from vimscript
++ Configuration points for project root detection and whitelist management (esp. signature generation)
