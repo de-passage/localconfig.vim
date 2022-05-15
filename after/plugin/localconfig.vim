@@ -6,6 +6,7 @@ scriptencoding utf-8
 if &cp || exists('g:loaded_localconfig_plugin_after') && g:loaded_localconfig_plugin_after
   finish
 endif
+
 let g:loaded_localconfig_plugin_after = 1
 
 " Plugin starts here
@@ -29,7 +30,6 @@ else
   let s:options.auto_reload = 1
 endif
 
-" Acceptable values: 'none', 'filename', 'md5', 'sha1', 'sha256'
 if exists('g:localconfig_whitelist_policy') && index(["", "sha256", "filename"], g:localconfig_whitelist_policy) >= 0
   let s:options.policy = g:localconfig_whitelist_policy
 else
