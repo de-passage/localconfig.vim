@@ -1,12 +1,3 @@
-function s:sys_call(cmd)
-  call system(a:cmd)
-  if v:shell_error == 0
-    return v:true
-  else
-    return v:false
-  endif
-endfunction
-
 function s:sys_call_throw(cmd, msg)
   let l:result = system(a:cmd)
   if v:shell_error != 0
@@ -39,7 +30,13 @@ function s:compute_sha256(file)
 endfunction
 
 function s:create_cache_file(file, content)
-  return s:sys_call("echo '" . a:content . "' > " . a:file) && s:sys_call('chmod 600 ' . a:file)
+  if writefile([a:content], a:file) != 0
+    throw "Couldn't write signature file. Please check that you have write permissions over the cache directory"
+  endif
+  if !setfperm(a:file, "rw-------")
+    call delete(a:file)
+    throw "Couldn't set permissions of signature file"
+  endif
 endfunction
 
 function s:mangle_file_name(file)
@@ -56,7 +53,6 @@ function s:compute_signature(file_name, policy)
   endif
 endfunction
 
-" This is a test documentation
 function s:create_signature_file(options)
   let l:full_file_name = a:options.full_file_name
   let l:cache_dir = a:options.cache_directory
